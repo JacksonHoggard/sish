@@ -6,3 +6,26 @@
 
 ### To run:
 `./sish`
+
+### Supported commands:
+```
+cat
+more
+less
+head
+tail
+mkdir
+cp
+mv
+rm
+touch
+grep
+sort
+wc
+cut
+ls
+grep
+exit
+cd
+history
+```

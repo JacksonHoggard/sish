@@ -24,7 +24,6 @@ sort
 wc
 cut
 ls
-grep
 exit
 cd
 history

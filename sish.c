@@ -1,11 +1,15 @@
 #include <string.h>
+#include <signal.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #define MAX 1024
 
 int parse_command(char* token);
+int is_numeric(char* str);
+int run_command(char** history, int* his_counter, char** tokens, int* num_tokens);
 void read_line(char* lineptr);
 int split_line_tok(char* lineptr, char* delim, char** tokens);
 void sish_loop();
@@ -19,7 +23,7 @@ int main(int argc, char *argv[]) {
 void sish_loop() {
   char lineptr[MAX];
   char* tokens[MAX];
-  char num_tokens;
+  int num_tokens;
   char** history;
   int his_counter = 0;
 
@@ -30,57 +34,22 @@ void sish_loop() {
     printf("sish> ");
     read_line(lineptr);
 
-    if(his_counter > 99)
-      his_counter = 0;
+    if(his_counter > 99) {
+      his_counter = 99;
+      free(history[0]);
+      for(size_t i = 0; i < 100; i++) {
+        history[i] = history[i + 1];
+      }
+    }
     history[his_counter] = (char*)malloc(MAX * sizeof(char));
     strcpy(history[his_counter], lineptr);
     his_counter++;
 
     num_tokens = split_line_tok(lineptr, " ", tokens);
 
-    switch(parse_command(tokens[0])) {
-      case 0:
-        run = 0;
-	break;
-      case 1:
-	if(num_tokens < 2) {
-	  printf("Error: Too few arguments for command \'cd\'\n");
-	  break;
-	}
-	if(num_tokens > 2) {
-	  printf("Error: Too many arguments for command \'cd\'\n");
-	  break;
-	}
-	if(chdir(tokens[1]) != 0)
-	  printf("Error: cd to %s failed\n", tokens[1]);
-	break;
-      case 2:
-	if(num_tokens == 1) {
-          for(size_t i = 0; i < his_counter; i++) {
-            printf("%zu ", i);
-            printf("%s", history[i]);
-          }
-	  break;
-        }
-	if(num_tokens > 2) {
-	  printf("Error: Too many arguments for command \'history\'\n");
-	  break;
-	}
-	if(num_tokens == 2 && strcmp(tokens[1], "-c") == 0) {
-	  printf("clear\n");
-	  break;
-	} else {
-	  printf("Error: Invalid argument \'%s\' for command \'history\'\n", tokens[1]);
-	  break;
-	}
-	break;	
-      default:
-        printf("Unrecognized command: \'%s\'\n", tokens[0]);
-        break;
-    }
-  }
+    run = run_command(history, &his_counter, tokens, &num_tokens);
 
-  free(history);
+  }
 }
 
 void read_line(char* lineptr) {
@@ -105,18 +74,115 @@ int split_line_tok(char* lineptr, char* delim, char** tokens) {
 }
 
 int parse_command(char* token) {
-  char* exit = "exit";
-  char* cd = "cd";
-  char* history = "history";
-
-  if(strcmp(token, exit) == 0)
+  if(strcmp(token, "exit") == 0)
     return 0;
 
-  if(strcmp(token, cd) == 0)
+  if(strcmp(token, "cd") == 0)
     return 1;
 
-  if(strcmp(token, history) == 0)
+  if(strcmp(token, "history") == 0)
     return 2;
 
   return -1;
+}
+
+int run_command(char** history, int* his_counter, char** tokens, int* num_tokens) {
+  
+  switch(parse_command(tokens[0])) {
+      case 0:
+        return 0;
+	break;
+      case 1:
+	if(*num_tokens < 2) {
+	  printf("Error: Too few arguments for command \'cd\'\n");
+	  break;
+	}
+	if(*num_tokens > 2) {
+	  printf("Error: Too many arguments for command \'cd\'\n");
+	  break;
+	}
+	if(chdir(tokens[1]) != 0)
+	  printf("Error: cd to %s failed\n", tokens[1]);
+	break;
+      case 2:
+	if(*num_tokens == 1) {
+          for(size_t i = 0; i < *his_counter; i++) {
+            printf("%zu ", i);
+            printf("%s", history[i]);
+          }
+	  break;
+        }
+	if(*num_tokens > 2) {
+	  printf("Error: Too many arguments for command \'history\'\n");
+	  break;
+	}
+	if(*num_tokens == 2 && strcmp(tokens[1], "-c") == 0) {
+	  *his_counter = 0;
+	  break;
+	} else if(is_numeric(tokens[1])){
+	  long temp = strtol(tokens[1], NULL, 10);
+	  if(temp > *his_counter || temp < 0) {
+	    printf("Error: Invalid offset \'%s\' for command \'history\'\n", tokens[1]);
+	    break;
+	  }
+	  if(*his_counter == 1 || strcmp(history[0], "history 0\n") == 0) {
+	    for(size_t i = 0; i < *his_counter; i++) {
+	      printf("%zu ", i);
+	      printf("%s", history[i]);
+	    }
+	    break;
+	  }
+	  char* temp_toks[MAX];
+	  char* temp_line = (char*)malloc(MAX * sizeof(char));
+	  strcpy(temp_line, history[temp]);
+	  int temp_num = split_line_tok(temp_line, " ", temp_toks);
+	  run_command(history, his_counter, temp_toks, &temp_num);
+	  free(temp_line);
+	  break;
+	} else {
+	  printf("Error: Invalid argument \'%s\' for command \'history\'\n", tokens[1]);
+	  break;
+	}
+	break;
+      default: ;
+	int child = fork();
+	int child_status;
+	char* argv[MAX];
+
+	size_t i = 0;
+	for(i = 0; i < *num_tokens; i++) {
+	  argv[i] = (char*)malloc(MAX * sizeof(char));
+	  argv[i] = strcpy(argv[i], tokens[i]);
+	}
+	argv[i + 1] = NULL;
+
+	if(child == 0) {
+	  int status = execvp(tokens[0], argv);
+	  if(status == -1) {
+	    printf("Unrecognized command: \'%s\'\n", tokens[0]);
+	  }
+	  exit(0);
+	} else {
+	  int tpid;
+	  while(tpid != child) {
+	    tpid = wait(&child_status);
+	  }
+	}
+
+        break;
+    }
+
+  return 1;
+}
+
+
+int is_numeric(char* str)
+{
+  while(*str != '\0')
+  {
+      if(*str < '0' || *str > '9')
+          return 0;
+      str++;
+  }
+  return 1;
 }

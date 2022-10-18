@@ -21,34 +21,42 @@ int main(int argc, char *argv[]) {
 }
 
 void sish_loop() {
-  char lineptr[MAX];
+  char* lineptr;
+  char* templine;
   char* tokens[MAX];
   int num_tokens;
   char** history;
   int his_counter = 0;
 
+  lineptr = (char*)malloc(MAX * sizeof(char));
+  templine = (char*)malloc(MAX * sizeof(char));
   history = (char**)malloc(100 * sizeof(char*));
 
   int run = 1;
   while(run) {
     printf("sish> ");
     read_line(lineptr);
+    strcpy(templine, lineptr);
+
+    // Split line into multiple pipe commands
+    char* cmds[MAX];
+    int num_cmds = split_line_tok(lineptr, "|", cmds);
+    for(size_t i = 0; i < num_cmds; i++) {
+      num_tokens = split_line_tok(cmds[i], " ", tokens);
+      run = run_command(history, &his_counter, tokens, &num_tokens);
+    }
 
     if(his_counter > 99) {
       his_counter = 99;
       free(history[0]);
-      for(size_t i = 0; i < 100; i++) {
+      for(size_t i = 0; i < 99; i++) {
         history[i] = history[i + 1];
       }
+      free(history[100]);
     }
     history[his_counter] = (char*)malloc(MAX * sizeof(char));
-    strcpy(history[his_counter], lineptr);
+    strcpy(history[his_counter], templine);
     his_counter++;
-
-    num_tokens = split_line_tok(lineptr, " ", tokens);
-
-    run = run_command(history, &his_counter, tokens, &num_tokens);
-
   }
 }
 
@@ -67,7 +75,8 @@ int split_line_tok(char* lineptr, char* delim, char** tokens) {
   }
 
   token = tokens[i - 1];
-  *(token + strlen(token) - 1) = '\0';
+  if(*(token + strlen(token) - 1) == '\n')
+    *(token + strlen(token) - 1) = '\0';
   tokens[i - 1] = token;
 
   return i;
@@ -87,7 +96,6 @@ int parse_command(char* token) {
 }
 
 int run_command(char** history, int* his_counter, char** tokens, int* num_tokens) {
-  
   switch(parse_command(tokens[0])) {
       case 0:
         return 0;
@@ -145,7 +153,7 @@ int run_command(char** history, int* his_counter, char** tokens, int* num_tokens
 	}
 	break;
       default: ;
-	int child = fork();
+	int child;
 	int child_status;
 	char* argv[MAX];
 
@@ -154,8 +162,9 @@ int run_command(char** history, int* his_counter, char** tokens, int* num_tokens
 	  argv[i] = (char*)malloc(MAX * sizeof(char));
 	  argv[i] = strcpy(argv[i], tokens[i]);
 	}
-	argv[i + 1] = NULL;
+	argv[i] = NULL;
 
+	child = fork();
 	if(child == 0) {
 	  int status = execvp(tokens[0], argv);
 	  if(status == -1) {
@@ -174,7 +183,6 @@ int run_command(char** history, int* his_counter, char** tokens, int* num_tokens
 
   return 1;
 }
-
 
 int is_numeric(char* str)
 {

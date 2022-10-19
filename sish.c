@@ -10,6 +10,7 @@
 int parse_command(char* token);
 int is_numeric(char* str);
 int run_command(char** history, int* his_counter, char** tokens, int* num_tokens);
+void pipe_command(char** cmds, int num_cmds);
 void read_line(char* lineptr);
 int split_line_tok(char* lineptr, char* delim, char** tokens);
 void sish_loop();
@@ -28,12 +29,13 @@ void sish_loop() {
   char** history;
   int his_counter = 0;
 
-  lineptr = (char*)malloc(MAX * sizeof(char));
-  templine = (char*)malloc(MAX * sizeof(char));
   history = (char**)malloc(100 * sizeof(char*));
 
   int run = 1;
   while(run) {
+    lineptr = (char*)malloc(MAX * sizeof(char));
+    templine = (char*)malloc(MAX * sizeof(char));
+
     printf("sish> ");
     read_line(lineptr);
     strcpy(templine, lineptr);
@@ -41,9 +43,11 @@ void sish_loop() {
     // Split line into multiple pipe commands
     char* cmds[MAX];
     int num_cmds = split_line_tok(lineptr, "|", cmds);
-    for(size_t i = 0; i < num_cmds; i++) {
-      num_tokens = split_line_tok(cmds[i], " ", tokens);
+    if(num_cmds <= 1) {
+      num_tokens = split_line_tok(cmds[0], " ", tokens);
       run = run_command(history, &his_counter, tokens, &num_tokens);
+    } else {
+      pipe_command(cmds, num_cmds);
     }
 
     if(his_counter > 99) {
@@ -57,6 +61,9 @@ void sish_loop() {
     history[his_counter] = (char*)malloc(MAX * sizeof(char));
     strcpy(history[his_counter], templine);
     his_counter++;
+
+    free(templine);
+    free(lineptr);
   }
 }
 
@@ -182,6 +189,66 @@ int run_command(char** history, int* his_counter, char** tokens, int* num_tokens
     }
 
   return 1;
+}
+
+void pipe_command(char** cmds, int num_cmds) {
+  int prev_pipe, fd[2];
+
+  prev_pipe = STDIN_FILENO;
+
+  int child = fork();
+  if(child == 0) {
+    for(size_t i = 0; i < num_cmds - 1; i++) {
+      pipe(fd);
+
+      char* tokens[MAX];
+      int num_tokens = split_line_tok(cmds[i], " ", tokens);
+      char* argv[MAX];
+
+      size_t i = 0;
+      for(i = 0; i < num_tokens; i++) {
+        argv[i] = (char*)malloc(MAX * sizeof(char));
+        argv[i] = strcpy(argv[i], tokens[i]);
+      }
+      argv[i] = NULL;
+    
+      int child = fork();
+      if(child == 0) {
+        if(prev_pipe != STDIN_FILENO) {
+          dup2(prev_pipe, STDIN_FILENO);
+	  close(prev_pipe);
+        }
+
+        dup2(fd[1], STDOUT_FILENO);
+        close(fd[1]);
+
+        execvp(tokens[0], argv);
+        printf("Error: Unrecognized command \'%s\'\n", tokens[0]);
+        exit(0);
+      }
+
+      close(prev_pipe);
+      close(fd[1]);
+      prev_pipe = fd[0];
+
+    }
+
+    if(prev_pipe != STDIN_FILENO) {
+      dup2(prev_pipe, STDIN_FILENO);
+      close(prev_pipe);
+    }
+
+    char* tokens[MAX];
+    int num_tokens = split_line_tok(cmds[num_cmds - 1], " ", tokens);
+
+    run_command(NULL, NULL, tokens, &num_tokens);
+
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+
+    exit(0);
+  }
+  waitpid(child, NULL, 0);
 }
 
 int is_numeric(char* str)
